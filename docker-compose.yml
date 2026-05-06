@@ -1,0 +1,19 @@
+version: "3.8"
+
+services:
+  v2v:
+    build: .
+    container_name: v2v
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./input:/app/input
+      - ./output:/app/output
+      - ./temp:/app/temp
+      - ./models:/app/models
+    environment:
+      - WHISPER_MODEL=${WHISPER_MODEL:-medium}
+      - WHISPER_DEVICE=${WHISPER_DEVICE:-cpu}
+      - WHISPER_COMPUTE_TYPE=${WHISPER_COMPUTE_TYPE:-int8}
+      - TRANSLATION_ENGINE=${TRANSLATION_ENGINE:-google}
+    restart: unless-stopped

@@ -1,0 +1,16 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(python3 -m py_compile app/config/settings.py)",
+      "Bash(python3 -m py_compile app/utils/logger.py)",
+      "Bash(python3 -m py_compile app/services/audio_extractor.py)",
+      "Bash(python3 -m py_compile app/services/speech_to_text.py)",
+      "Bash(python3 -m py_compile app/services/subtitle_generator.py)",
+      "Bash(/Users/lani/src/v2v/.venv/bin/pip install *)",
+      "Bash(/Users/lani/src/v2v/.venv/bin/python *)",
+      "Bash(/Users/lani/src/v2v/.venv/bin/pip list *)",
+      "Bash(/Users/lani/src/v2v/.venv/bin/ffmpeg -y -i /Users/lani/src/v2v/temp/1c9b302d72ce/25175096045510057__audio.wav -t 10 -c copy /tmp/test_short.wav)",
+      "Bash(ffmpeg -y -i /Users/lani/src/v2v/temp/1c9b302d72ce/25175096045510057__audio.wav -t 10 -c copy /tmp/test_short.wav)"
+    ]
+  }
+}
