@@ -31,6 +31,8 @@ Server runs on http://localhost:8000
 - `translator.py` — MarianMT/NLLB/Google translation
 - `subtitle_generator.py` — SRT generation
 - `video_burner.py` — ffmpeg subtitle burning
+- `video_downloader.py` — yt-dlp video download from URLs
+- `cross_validation.py` — Cross-validation for ASR and translation
 
 **Configuration**: `app/config/settings.py` loads from `.env` and creates required directories
 
@@ -46,9 +48,23 @@ Server runs on http://localhost:8000
 Key settings in `.env`:
 - `WHISPER_MODEL` — tiny/base/small/medium/large-v3 (default: medium)
 - `WHISPER_DEVICE` — auto/cpu/cuda (default: auto)
+- `WHISPER_COMPUTE_TYPE` — auto/float16/int8 (default: auto)
+- `WHISPER_BEAM_SIZE` — 5=fast, 10=accurate (default: 5)
+- `WHISPER_BEST_OF` — candidates to sample (default: 5)
+- `WHISPER_TEMPERATURE` — fallback decoding temps (default: 0.0,0.2,0.4,0.6,0.8,1.0)
+- `WHISPER_REPETITION_PENALTY` — reduce hallucinations (default: 1.1)
+- `WHISPER_NO_SPEECH_THRESHOLD` — silence detection (default: 0.6)
+- `WHISPER_WORD_TIMESTAMPS` — word-level timestamps (default: false)
+- `WHISPER_VAD_MIN_SILENCE_MS` — min silence between segments (default: 500)
 - `TRANSLATION_ENGINE` — google/marian/nllb (default: marian)
-- `SUBTITLE_FONT_SIZE` — Default: 24
 - `USE_CROSS_VALIDATION` — Enable cross-validation for better accuracy (default: false)
+- `SUBTITLE_FONT_SIZE` — Default: 24
+- `SUBTITLE_FONT_COLOR` — Default: white
+- `SUBTITLE_OUTLINE_COLOR` — Default: black
+- `SUBTITLE_OUTLINE` — Default: 2
+- `MAX_SEGMENT_LENGTH` — seconds per chunk for long audio (default: 30)
+- `HOST` — Server host (default: 0.0.0.0)
+- `PORT` — Server port (default: 8000)
 
 ## Translation Engines
 
@@ -66,10 +82,13 @@ docker compose up
 
 ## API Endpoints
 
-- `POST /upload` — Upload video with `target_language` param
+- `POST /upload` — Upload video file with `target_language` param
+- `POST /download-url` — Download video from URL (YouTube, TikTok, etc.) with `target_language` param
 - `GET /status/{task_id}` — Check processing status
 - `GET /download/{task_id}` — Download result
 - `GET /health` — Health check
+
+**Supported video formats**: mp4, mov, mkv, avi, webm, flv, wmv
 
 ## Dependencies
 
@@ -95,6 +114,7 @@ This is a known issue with uvicorn reload + pyenv where the subprocess uses syst
 - Task state stored in-memory (not production-ready)
 - CORS enabled for all origins (MVP)
 - Whisper models auto-download to `models/` on first use
+- Uploaded files with duplicate names are automatically renamed with a counter (e.g., `video_1.mp4`)
 
 ## Cross-Validation
 
@@ -106,8 +126,8 @@ Enable cross-validation for improved accuracy by setting `USE_CROSS_VALIDATION=t
 - Provides confidence scores
 
 **Translation cross-validation:**
-- Uses multiple translation engines (Google, MarianMT, NLLB)
-- Applies context-aware analysis
+- Uses primary translation engine plus one alternative (google > marian > nllb priority)
+- Applies consensus-based scoring to select best translation
 - Improves translation consistency
 
 **Note:** Cross-validation significantly increases processing time but improves accuracy.

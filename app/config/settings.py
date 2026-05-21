@@ -79,6 +79,12 @@ class Settings:
         os.getenv("USE_CROSS_VALIDATION", "false").lower() == "true"
     )
 
+    # --- Vocal separation (Demucs) ---
+    USE_VOCAL_SEPARATION: bool = (
+        os.getenv("USE_VOCAL_SEPARATION", "false").lower() == "true"
+    )
+    DEMUCS_MODEL: str = os.getenv("DEMUCS_MODEL", "htdemucs")  # htdemucs, htdemucs_ft, htdemucs_6s
+
     # --- Video ---
     FFMPEG_PATH: str = os.getenv("FFMPEG_PATH", "ffmpeg")
     FFPROBE_PATH: str = os.getenv("FFPROBE_PATH", "ffprobe")

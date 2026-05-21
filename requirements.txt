@@ -5,6 +5,8 @@ python-multipart>=0.0.6
 
 # ── Video / audio processing ──
 ffmpeg-python>=0.2.0
+demucs>=4.0
+torchcodec>=0.2
 
 # ── Speech recognition ──
 faster-whisper>=1.0.3

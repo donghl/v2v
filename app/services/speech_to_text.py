@@ -1,6 +1,7 @@
 """Speech-to-text using faster-whisper with GPU-optimized decoding."""
 
 import json
+import threading
 from pathlib import Path
 
 from app.config.settings import settings
@@ -15,13 +16,58 @@ class TranscriptionError(Exception):
 # Data types
 # ---------------------------------------------------------------------------
 
-from typing import TypedDict
+from typing import TypedDict, Any
 
 
 class Segment(TypedDict):
     start: float
     end: float
     text: str
+
+
+# ---------------------------------------------------------------------------
+# Global model singleton — loaded once, reused across all tasks
+# ---------------------------------------------------------------------------
+
+_model: Any = None
+_model_lock = threading.Lock()
+
+
+def _get_model():
+    """Return the shared WhisperModel, loading it on first call."""
+    global _model
+    if _model is not None:
+        return _model
+
+    with _model_lock:
+        if _model is not None:
+            return _model
+
+        from faster_whisper import WhisperModel
+
+        device = _resolve_device()
+        compute_type = _resolve_compute_type(device)
+
+        logger.info(
+            f"Loading Whisper model: {settings.WHISPER_MODEL} "
+            f"(device={device}, compute={compute_type})"
+        )
+
+        try:
+            _model = WhisperModel(
+                settings.WHISPER_MODEL,
+                device=device,
+                compute_type=compute_type,
+                download_root=str(settings.MODELS_DIR),
+                cpu_threads=4,
+                num_workers=1,
+            )
+        except Exception as e:
+            raise TranscriptionError(
+                f"Failed to load Whisper model '{settings.WHISPER_MODEL}': {e}"
+            )
+
+        return _model
 
 
 def transcribe(audio_path: Path, temp_dir: Path) -> tuple[list[Segment], str]:
@@ -37,30 +83,7 @@ def transcribe(audio_path: Path, temp_dir: Path) -> tuple[list[Segment], str]:
     if not audio_path.exists():
         raise TranscriptionError(f"Audio file not found: {audio_path}")
 
-    try:
-        from faster_whisper import WhisperModel
-    except ImportError:
-        raise TranscriptionError("faster-whisper not installed. Run: pip install faster-whisper")
-
-    device = _resolve_device()
-    compute_type = _resolve_compute_type(device)
-
-    logger.info(
-        f"Loading Whisper model: {settings.WHISPER_MODEL} "
-        f"(device={device}, compute={compute_type})"
-    )
-
-    try:
-        model = WhisperModel(
-            settings.WHISPER_MODEL,
-            device=device,
-            compute_type=compute_type,
-            download_root=str(settings.MODELS_DIR),
-            cpu_threads=4,  # limit CPU threads when GPU is primary
-            num_workers=1,
-        )
-    except Exception as e:
-        raise TranscriptionError(f"Failed to load Whisper model '{settings.WHISPER_MODEL}': {e}")
+    model = _get_model()
 
     # Parse temperature fallback schedule
     temperatures = _parse_temperatures(settings.WHISPER_TEMPERATURE)

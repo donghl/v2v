@@ -1,0 +1,12 @@
+=== Batch processing 13 files ===
+[1/13] Processing: 1631496837882642.mp4
+  Task: 72fedcbf30ab
+  [extracting_audio 5%]
+  [extracting_audio 15%]
+  [extracting_audio 15%]
+  [extracting_audio 15%]
+  [extracting_audio 15%]
+  [transcribing 25%]
+  [transcribing 25%]
+  [transcribing 25%]
+  [transcribing 25%]

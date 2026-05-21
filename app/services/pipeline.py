@@ -17,6 +17,7 @@ from pathlib import Path
 from app.config.settings import settings
 from app.utils.logger import logger
 from app.services.audio_extractor import extract_audio, AudioExtractionError
+from app.services.vocal_separator import separate_vocals, VocalSeparationError
 from app.services.speech_to_text import transcribe, TranscriptionError
 from app.services.subtitle_generator import segments_to_srt
 from app.services.translator import translate_segments, TranslationError
@@ -102,6 +103,14 @@ def run_pipeline(task_id: str) -> None:
         audio_path = extract_audio(video_path, work_dir)
         state.progress = 15
 
+        # ── Step 1.5: Vocal separation (optional) ──
+        if getattr(settings, "USE_VOCAL_SEPARATION", False):
+            logger.info(f"[{task_id}] Separating vocals from background music ...")
+            vocals = separate_vocals(audio_path, work_dir / "demucs")
+            # Convert back to 16kHz mono for Whisper
+            audio_path = _convert_audio_for_whisper(vocals, work_dir)
+            state.progress = 25
+
         # ── Step 2: Transcribe ──
         state.status = PipelineStatus.TRANSCRIBING
         logger.info(f"[{task_id}] Transcribing ...")
@@ -130,9 +139,12 @@ def run_pipeline(task_id: str) -> None:
 
         # ── Step 3: Translate ──
         state.status = PipelineStatus.TRANSLATING
-        logger.info(f"[{task_id}] Translating {detected_lang} → {target_lang} ...")
 
-        if use_cross_validation:
+        # Skip translation if source and target are the same language
+        if detected_lang == target_lang:
+            logger.info(f"[{task_id}] Source=target ({detected_lang}), skipping translation")
+            translated = segments
+        elif use_cross_validation:
             logger.info(f"[{task_id}] Using cross-validated translation")
             translation_result = translate_with_validation(
                 segments,
@@ -161,6 +173,12 @@ def run_pipeline(task_id: str) -> None:
         logger.info(f"[{task_id}] Burning subtitles ...")
         output_filename = f"{video_path.stem}_subtitled_{target_lang}.mp4"
         output_path = settings.OUTPUT_DIR / output_filename
+        # Avoid overwriting existing output
+        counter = 1
+        while output_path.exists():
+            output_filename = f"{video_path.stem}_subtitled_{target_lang}_{counter}.mp4"
+            output_path = settings.OUTPUT_DIR / output_filename
+            counter += 1
         burn_subtitles(video_path, translated_srt, output_path)
         state.progress = 98
 
@@ -170,8 +188,12 @@ def run_pipeline(task_id: str) -> None:
         state.progress = 100
         logger.info(f"[{task_id}] Pipeline complete → {output_path}")
 
+        # Clean up temp working directory only (keep source video)
+        _cleanup_temp(work_dir)
+
     except (
         AudioExtractionError,
+        VocalSeparationError,
         TranscriptionError,
         TranslationError,
         BurnError,
@@ -181,7 +203,39 @@ def run_pipeline(task_id: str) -> None:
         state.status = PipelineStatus.FAILED
         state.error = str(e)
         logger.error(f"[{task_id}] Pipeline failed: {e}")
+        _cleanup_temp(work_dir)
     except Exception as e:
         state.status = PipelineStatus.FAILED
         state.error = f"Unexpected error: {e}"
         logger.exception(f"[{task_id}] Unexpected error")
+        _cleanup_temp(work_dir)
+
+
+def _convert_audio_for_whisper(audio_path: Path, work_dir: Path) -> Path:
+    """Convert Demucs output (44.1kHz stereo) to Whisper-optimized (16kHz mono)."""
+    import subprocess
+
+    output_path = work_dir / f"{audio_path.stem}_16k.wav"
+    cmd = [
+        settings.FFMPEG_PATH,
+        "-i", str(audio_path),
+        "-ar", str(settings.AUDIO_SAMPLE_RATE),
+        "-ac", "1",
+        "-y",
+        str(output_path),
+    ]
+    subprocess.run(cmd, capture_output=True, check=True)
+    logger.info(f"Converted to 16kHz mono: {output_path}")
+    return output_path
+
+
+def _cleanup_temp(work_dir: Path) -> None:
+    """Remove temporary working directory after successful processing."""
+    import shutil
+
+    try:
+        if work_dir.exists():
+            shutil.rmtree(work_dir)
+            logger.info(f"Cleaned up temp: {work_dir}")
+    except Exception as e:
+        logger.warning(f"Failed to clean temp {work_dir}: {e}")

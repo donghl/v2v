@@ -78,6 +78,22 @@ def transcribe_with_validation(
         primary_segments, alternative_segments
     )
 
+    # Guard: if confidence is extremely low, the alternative engine produced
+    # garbage (e.g. hallucinated text on an unsupported language like Thai).
+    # Fall back to primary-only to avoid corrupting the output.
+    if confidence < 0.1:
+        logger.warning(
+            f"Cross-validation confidence too low ({confidence:.4f}), "
+            f"discarding alternative results and falling back to primary engine"
+        )
+        return ValidationResult(
+            segments=primary_segments,
+            detected_language=detected_lang,
+            confidence=1.0,
+            validation_method="single_engine_fallback",
+            alternative_results={},
+        )
+
     # Save validation results
     validation_result = ValidationResult(
         segments=validated_segments,

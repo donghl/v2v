@@ -10,7 +10,15 @@
       "Bash(/Users/lani/src/v2v/.venv/bin/python *)",
       "Bash(/Users/lani/src/v2v/.venv/bin/pip list *)",
       "Bash(/Users/lani/src/v2v/.venv/bin/ffmpeg -y -i /Users/lani/src/v2v/temp/1c9b302d72ce/25175096045510057__audio.wav -t 10 -c copy /tmp/test_short.wav)",
-      "Bash(ffmpeg -y -i /Users/lani/src/v2v/temp/1c9b302d72ce/25175096045510057__audio.wav -t 10 -c copy /tmp/test_short.wav)"
+      "Bash(ffmpeg -y -i /Users/lani/src/v2v/temp/1c9b302d72ce/25175096045510057__audio.wav -t 10 -c copy /tmp/test_short.wav)",
+      "Bash(/Users/lani/src/v2v/.venv/bin/yt-dlp *)",
+      "Bash(curl -s http://localhost:8000/health)",
+      "Bash(curl *)",
+      "Bash(/Users/lani/src/v2v/.venv/bin/uvicorn app.main:app --host 0.0.0.0 --port 8000)",
+      "Bash(grep -v '^$')",
+      "Bash(cat)",
+      "Bash(chmod +x /tmp/batch_process.sh)",
+      "Bash(nohup /tmp/batch_process.sh)"
     ]
   }
 }

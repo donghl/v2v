@@ -4,8 +4,8 @@ import shutil
 import threading
 from pathlib import Path
 
-from fastapi import APIRouter, File, Form, UploadFile, HTTPException
-from fastapi.responses import FileResponse
+from fastapi import APIRouter, File, Form, UploadFile, HTTPException, Request
+from fastapi.responses import FileResponse, HTMLResponse
 from app.config.settings import settings
 from app.services.pipeline import submit_task, get_task, run_pipeline, PipelineStatus
 from app.services.video_downloader import download_video, DownloadError
@@ -65,6 +65,35 @@ async def upload_video(
     task = submit_task(input_path, target_language)
 
     # Run pipeline in background thread
+    thread = threading.Thread(target=run_pipeline, args=(task.task_id,), daemon=True)
+    thread.start()
+
+    return {"task_id": task.task_id}
+
+
+@router.post("/process")
+async def process_local(
+    filename: str = Form(...),
+    target_language: str = Form(default="zh"),
+):
+    """
+    Process a file that already exists in the input/ directory.
+    No file copy — uses the file in-place.
+
+    Args:
+        filename: Name of the file in input/ directory.
+        target_language: Target language code (default: zh).
+
+    Returns:
+        JSON with task_id for tracking.
+    """
+    input_path = settings.INPUT_DIR / filename
+    if not input_path.exists():
+        raise HTTPException(status_code=404, detail=f"File not found in input/: {filename}")
+
+    logger.info(f"Processing local: {filename}")
+
+    task = submit_task(input_path, target_language)
     thread = threading.Thread(target=run_pipeline, args=(task.task_id,), daemon=True)
     thread.start()
 
@@ -180,6 +209,13 @@ async def download_result(task_id: str):
         media_type="video/mp4",
         filename=task.output_path.name,
     )
+
+
+@router.get("/", response_class=HTMLResponse)
+async def index():
+    """Serve the web UI."""
+    html_path = __import__("pathlib").Path(__file__).resolve().parent.parent / "templates" / "index.html"
+    return HTMLResponse(content=html_path.read_text(encoding="utf-8"))
 
 
 @router.get("/health")

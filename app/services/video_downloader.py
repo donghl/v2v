@@ -53,15 +53,26 @@ def download_video(url: str, output_dir: Path) -> tuple[Path, str]:
 
     output_template = str(output_dir / "%(title).100s_%(id)s.%(ext)s")
 
+    # Check if this video was already downloaded (by video ID in filename)
+    with yt_dlp.YoutubeDL({"quiet": True, "noplaylist": True, "playlistend": 1}) as ydl:
+        info = ydl.extract_info(url, download=False)
+        if info is None:
+            raise DownloadError("yt-dlp returned no info")
+        video_id = info.get("id", "")
+        if video_id:
+            existing = list(output_dir.glob(f"*{video_id}*"))
+            if existing:
+                logger.info(f"Already downloaded: {existing[0].name}")
+                return existing[0], info.get("title", "unknown")
+
     ydl_opts = {
-        "format": "mp4/best[ext=mp4]/best[height<=1080]",  # prefer mp4, max 1080p
+        "format": "mp4/best[ext=mp4]/best[height<=1080]",
         "outtmpl": output_template,
         "quiet": True,
         "no_warnings": True,
         "ignoreerrors": False,
         "nocheckcertificate": True,
         "restrictfilenames": True,
-        # Don't download playlists / channels — single video only
         "noplaylist": True,
         "playlistend": 1,
     }
@@ -71,11 +82,7 @@ def download_video(url: str, output_dir: Path) -> tuple[Path, str]:
     try:
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             info = ydl.extract_info(url, download=True)
-            if info is None:
-                raise DownloadError("yt-dlp returned no info")
-
             title = info.get("title", "unknown")
-            # yt-dlp may have downloaded a playlist; get the single entry
             if "entries" in info:
                 entries = info["entries"]
                 if not entries:
@@ -84,7 +91,6 @@ def download_video(url: str, output_dir: Path) -> tuple[Path, str]:
                 filename = ydl.prepare_filename(entry)
             else:
                 filename = ydl.prepare_filename(info)
-
     except yt_dlp.utils.DownloadError as e:
         raise DownloadError(f"Download failed: {e}")
     except Exception as e:
@@ -92,7 +98,6 @@ def download_video(url: str, output_dir: Path) -> tuple[Path, str]:
 
     video_path = Path(filename)
     if not video_path.exists():
-        # yt-dlp may have changed the extension — try to find it
         candidates = list(output_dir.glob(f"{video_path.stem}.*"))
         if candidates:
             video_path = candidates[0]
