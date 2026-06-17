@@ -138,3 +138,9 @@ pnpm-lock.yaml
 *.backup
 *.old
 *.orig
+
+# Claude IDE
+.claude/settings.local.json
+
+# Processing logs
+batch_log.txt
