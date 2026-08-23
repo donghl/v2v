@@ -72,6 +72,9 @@ class Settings:
     TRANSLATION_ENGINE: str = os.getenv(
         "TRANSLATION_ENGINE", "marian"
     )  # marian, nllb, google
+    TRANSLATION_DEVICE: str = os.getenv(
+        "TRANSLATION_DEVICE", "auto"
+    )  # auto, cuda, cpu
     # Marian models are loaded on-demand per language pair
 
     # --- Cross-validation ---
@@ -82,6 +85,11 @@ class Settings:
     # --- Vocal separation (Demucs) ---
     USE_VOCAL_SEPARATION: bool = (
         os.getenv("USE_VOCAL_SEPARATION", "false").lower() == "true"
+    )
+
+    # --- Bilingual subtitles ---
+    DUAL_SUBTITLES: bool = (
+        os.getenv("DUAL_SUBTITLES", "false").lower() == "true"
     )
     DEMUCS_MODEL: str = os.getenv("DEMUCS_MODEL", "htdemucs")  # htdemucs, htdemucs_ft, htdemucs_6s
 
@@ -100,6 +108,12 @@ class Settings:
     MAX_SEGMENT_LENGTH: int = int(
         os.getenv("MAX_SEGMENT_LENGTH", "30")
     )  # seconds per chunk for long audio
+
+    # --- Database ---
+    DATABASE_PATH: str = os.getenv("DATABASE_PATH", "./v2v.db")
+
+    # --- Subscription ---
+    SUBSCRIPTION_CHECK_INTERVAL: int = int(os.getenv("SUBSCRIPTION_CHECK_INTERVAL", "3600"))
 
     # --- Server ---
     HOST: str = os.getenv("HOST", "0.0.0.0")

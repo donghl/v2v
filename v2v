@@ -1,0 +1,117 @@
+#!/usr/bin/env python3
+"""
+v2v — 一行命令翻译视频字幕
+
+用法:
+  ./v2v video.mp4 --to zh
+  ./v2v https://youtube.com/watch?v=xxx --to en
+  ./v2v input/*.mp4 --to zh          (批量)
+
+环境变量: TRANSLATION_ENGINE, WHISPER_MODEL 等，同 .env
+"""
+
+import sys
+import argparse
+from pathlib import Path
+
+# 确保能找到 app 包
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+
+from app.config.settings import settings
+from app.utils.logger import logger
+from app.services.audio_extractor import extract_audio
+from app.services.speech_to_text import transcribe
+from app.services.subtitle_generator import segments_to_srt
+from app.services.translator import translate_segments
+from app.services.video_burner import burn_subtitles
+
+
+def process_video(video_path: Path, target_lang: str) -> Path:
+    """处理单个视频：提取音频 → 识别 → 翻译 → 烧录"""
+    work_dir = settings.TEMP_DIR / video_path.stem
+    work_dir.mkdir(parents=True, exist_ok=True)
+
+    print(f"\n🎬 处理: {video_path.name}")
+
+    # 1. 提取音频
+    print("🔊 提取音频...")
+    audio = extract_audio(video_path, work_dir)
+
+    # 2. 语音识别
+    print("🎤 语音识别...")
+    segments, detected_lang = transcribe(audio, work_dir)
+    print(f"   → 检测到语言: {detected_lang}, {len(segments)} 条字幕")
+
+    # 3. 切分长句（先切分再翻译，保证双语段数严格对齐）
+    # 动态计算阈值：用视频宽高中的较小值做基准
+    import json as _json
+    import subprocess as _sp
+    _ref = 1080
+    try:
+        _r = _sp.run([settings.FFPROBE_PATH, "-v", "quiet", "-print_format", "json", "-show_streams", str(video_path)],
+                     capture_output=True, text=True, timeout=10)
+        _info = _json.loads(_r.stdout)
+        for _s in _info.get("streams", []):
+            if _s.get("codec_type") == "video":
+                _ref = min(_s.get("width", 1080), _s.get("height", 1080))
+                break
+    except Exception:
+        pass
+    from app.services.subtitle_generator import split_long_segments
+    segments = split_long_segments(segments, video_ref=_ref)
+    print(f"   → 切分后: {len(segments)} 条字幕")
+
+    # 4. 保存原文 SRT
+    segments_to_srt(segments, work_dir / "original.srt")
+
+    # 5. 翻译
+    if detected_lang == target_lang:
+        print(f"✅ 源语言=目标语言 ({detected_lang})，跳过翻译")
+        translated = segments
+    else:
+        print(f"🌐 翻译: {detected_lang} → {target_lang}...")
+        translated = translate_segments(segments, detected_lang, target_lang, work_dir)
+
+    # 6. 生成翻译后 SRT（段数、时间戳与原文完全一致）
+    srt_path = work_dir / "translated.srt"
+    segments_to_srt(translated, srt_path)
+
+    # 6. 烧录字幕
+    output = settings.OUTPUT_DIR / f"{video_path.stem}_subtitled_{target_lang}.mp4"
+    orig_srt = work_dir / "original.srt"
+    if settings.DUAL_SUBTITLES and orig_srt.exists() and detected_lang != target_lang:
+        print(f"🔥 烧录双语字幕 → {output.name}")
+        burn_subtitles(video_path, srt_path, output, original_srt_path=orig_srt)
+    else:
+        print(f"🔥 烧录字幕 → {output.name}")
+        burn_subtitles(video_path, srt_path, output)
+
+    print(f"✅ 完成 → {output}")
+    return output
+
+
+def main():
+    parser = argparse.ArgumentParser(description="V2V — 视频字幕翻译")
+    parser.add_argument("input", nargs="+", help="视频文件路径或URL")
+    parser.add_argument("--to", default="zh", help="目标语言 (默认: zh)")
+    args = parser.parse_args()
+
+    for item in args.input:
+        p = Path(item)
+
+        # 检测是否是 URL
+        if str(item).startswith(("http://", "https://")):
+            print(f"📥 下载: {item}")
+            from app.services.video_downloader import download_video
+            videos = download_video(item, settings.INPUT_DIR)
+            for video, title in videos:
+                print(f"   → {title}")
+                process_video(video, args.to)
+        elif p.exists():
+            process_video(p, args.to)
+        else:
+            print(f"❌ 文件不存在: {item}")
+
+
+if __name__ == "__main__":
+    main()

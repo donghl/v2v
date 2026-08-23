@@ -1,0 +1,17 @@
+models/
+input/
+output/
+temp/
+.venv/
+.git/
+.pytest_cache/
+__pycache__/
+*.pyc
+*.mp4
+*.mkv
+*.avi
+*.wav
+*.srt
+*.log
+.DS_Store
+.env.local

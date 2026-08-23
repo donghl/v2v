@@ -11,6 +11,8 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.api.routes import router
 from app.config.settings import settings
 from app.utils.logger import logger
+from app.database import init_db
+from app.services.subscription_checker import start_scheduler
 
 app = FastAPI(
     title="V2V — Video Subtitle Translator",
@@ -32,6 +34,8 @@ app.include_router(router)
 
 @app.on_event("startup")
 async def startup():
+    init_db()
+    start_scheduler()
     logger.info(f"V2V starting — model: {settings.WHISPER_MODEL}, device: {settings.WHISPER_DEVICE}")
     logger.info(f"Input dir: {settings.INPUT_DIR}")
     logger.info(f"Output dir: {settings.OUTPUT_DIR}")

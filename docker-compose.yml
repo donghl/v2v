@@ -1,19 +1,29 @@
-version: "3.8"
-
 services:
   v2v:
     build: .
     container_name: v2v
     ports:
-      - "8000:8000"
+      - "8010:8010"
     volumes:
       - ./input:/app/input
       - ./output:/app/output
       - ./temp:/app/temp
       - ./models:/app/models
     environment:
-      - WHISPER_MODEL=${WHISPER_MODEL:-medium}
-      - WHISPER_DEVICE=${WHISPER_DEVICE:-cpu}
-      - WHISPER_COMPUTE_TYPE=${WHISPER_COMPUTE_TYPE:-int8}
-      - TRANSLATION_ENGINE=${TRANSLATION_ENGINE:-google}
+      - WHISPER_MODEL=${WHISPER_MODEL:-large-v3}
+      - WHISPER_DEVICE=${WHISPER_DEVICE:-cuda}
+      - WHISPER_COMPUTE_TYPE=${WHISPER_COMPUTE_TYPE:-float16}
+      - TRANSLATION_ENGINE=${TRANSLATION_ENGINE:-nllb}
+      - TRANSLATION_DEVICE=${TRANSLATION_DEVICE:-cuda}
+      - USE_VOCAL_SEPARATION=${USE_VOCAL_SEPARATION:-true}
+      - USE_CROSS_VALIDATION=${USE_CROSS_VALIDATION:-false}
+      - HOST=0.0.0.0
+      - PORT=8010
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
     restart: unless-stopped

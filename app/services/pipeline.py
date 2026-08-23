@@ -11,6 +11,7 @@ Steps:
 """
 
 import uuid
+from datetime import datetime, timezone
 from enum import Enum
 from pathlib import Path
 
@@ -28,6 +29,7 @@ from app.services.cross_validation import (
     TranscriptionValidationError,
     TranslationValidationError,
 )
+from app import database
 
 
 class PipelineStatus(str, Enum):
@@ -43,10 +45,14 @@ class PipelineStatus(str, Enum):
 class TaskState:
     """Holds the state for a single pipeline task."""
 
-    def __init__(self, task_id: str, video_path: Path, target_lang: str):
+    def __init__(self, task_id: str, video_path: Path, target_lang: str,
+                 source_url: str | None = None, source_title: str | None = None):
         self.task_id = task_id
         self.video_path = video_path
         self.target_lang = target_lang
+        self.source_url = source_url
+        self.source_title = source_title
+        self.source_lang: str | None = None
         self.status = PipelineStatus.WAITING
         self.error: str | None = None
         self.output_path: Path | None = None
@@ -59,6 +65,10 @@ class TaskState:
             "progress": self.progress,
             "error": self.error,
             "output_file": self.output_path.name if self.output_path else None,
+            "source_url": self.source_url,
+            "source_title": self.source_title,
+            "source_lang": self.source_lang,
+            "target_lang": self.target_lang,
         }
 
 
@@ -66,11 +76,23 @@ class TaskState:
 _tasks: dict[str, TaskState] = {}
 
 
-def submit_task(video_path: Path, target_lang: str) -> TaskState:
-    """Create a new task and return it."""
+def submit_task(video_path: Path, target_lang: str,
+                source_url: str | None = None,
+                source_title: str | None = None) -> TaskState:
+    """Create a new task, persist to DB, and return it."""
     task_id = uuid.uuid4().hex[:12]
-    state = TaskState(task_id, video_path, target_lang)
+    state = TaskState(task_id, video_path, target_lang, source_url, source_title)
+    if source_title is None:
+        state.source_title = video_path.name
     _tasks[task_id] = state
+    database.save_task(
+        task_id=task_id,
+        status=state.status.value,
+        source_url=source_url,
+        source_title=state.source_title,
+        target_lang=target_lang,
+        video_path=str(video_path),
+    )
     logger.info(f"Task {task_id} created: {video_path.name} → {target_lang}")
     return state
 
@@ -113,6 +135,7 @@ def run_pipeline(task_id: str) -> None:
 
         # ── Step 2: Transcribe ──
         state.status = PipelineStatus.TRANSCRIBING
+        database.update_task(task_id, status=state.status.value, progress=25)
         logger.info(f"[{task_id}] Transcribing ...")
 
         # Check if cross-validation is enabled
@@ -130,6 +153,8 @@ def run_pipeline(task_id: str) -> None:
         else:
             segments, detected_lang = transcribe(audio_path, work_dir)
 
+        state.source_lang = detected_lang
+        database.update_task(task_id, source_lang=detected_lang, progress=45)
         state.progress = 45
 
         # Save original SRT
@@ -139,6 +164,7 @@ def run_pipeline(task_id: str) -> None:
 
         # ── Step 3: Translate ──
         state.status = PipelineStatus.TRANSLATING
+        database.update_task(task_id, status=state.status.value, progress=55)
 
         # Skip translation if source and target are the same language
         if detected_lang == target_lang:
@@ -186,6 +212,14 @@ def run_pipeline(task_id: str) -> None:
         state.status = PipelineStatus.COMPLETED
         state.output_path = output_path
         state.progress = 100
+        now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
+        database.update_task(
+            task_id,
+            status=state.status.value,
+            progress=100,
+            output_path=str(output_path),
+            completed_at=now,
+        )
         logger.info(f"[{task_id}] Pipeline complete → {output_path}")
 
         # Clean up temp working directory only (keep source video)
@@ -202,11 +236,15 @@ def run_pipeline(task_id: str) -> None:
     ) as e:
         state.status = PipelineStatus.FAILED
         state.error = str(e)
+        now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
+        database.update_task(task_id, status=state.status.value, error=str(e), completed_at=now)
         logger.error(f"[{task_id}] Pipeline failed: {e}")
         _cleanup_temp(work_dir)
     except Exception as e:
         state.status = PipelineStatus.FAILED
         state.error = f"Unexpected error: {e}"
+        now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
+        database.update_task(task_id, status=state.status.value, error=str(e), completed_at=now)
         logger.exception(f"[{task_id}] Unexpected error")
         _cleanup_temp(work_dir)
 

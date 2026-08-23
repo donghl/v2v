@@ -100,6 +100,51 @@ async def process_local(
     return {"task_id": task.task_id}
 
 
+@router.post("/process-all")
+async def process_all(
+    target_language: str = Form(default="zh"),
+):
+    """
+    Process all unprocessed video files in the input/ directory sequentially.
+    Skips files with _subtitled_ in the name and files already in output/.
+
+    Returns a list of task_ids in processing order.
+    """
+    input_dir = settings.INPUT_DIR
+    video_files = sorted(
+        f for f in input_dir.iterdir()
+        if f.suffix.lower() in {".mp4", ".mov", ".mkv", ".avi", ".webm"}
+        and "_subtitled_" not in f.stem
+    )
+
+    # Filter out files that already have output
+    pending: list[Path] = []
+    for vf in video_files:
+        if not list(settings.OUTPUT_DIR.glob(f"{vf.stem}_subtitled_*")):
+            pending.append(vf)
+
+    if not pending:
+        return {"message": "No files to process", "task_ids": []}
+
+    logger.info(f"Batch processing {len(pending)} files")
+
+    # Create all tasks upfront so the caller gets all task_ids immediately
+    task_list: list[str] = []
+    for vf in pending:
+        t = submit_task(vf, target_language)
+        task_list.append(t.task_id)
+        logger.info(f"[batch] Queued: {t.task_id} → {vf.name}")
+
+    def run_sequential():
+        for tid in task_list:
+            run_pipeline(tid)
+
+    thread = threading.Thread(target=run_sequential, daemon=True)
+    thread.start()
+
+    return {"files": len(pending), "task_ids": task_list}
+
+
 @router.post("/download-url")
 async def download_from_url(
     url: str = Form(...),
@@ -216,6 +261,77 @@ async def index():
     """Serve the web UI."""
     html_path = __import__("pathlib").Path(__file__).resolve().parent.parent / "templates" / "index.html"
     return HTMLResponse(content=html_path.read_text(encoding="utf-8"))
+
+
+# ── History ──────────────────────────────────────────────────────────────
+
+@router.get("/history")
+async def list_history(limit: int = 50, offset: int = 0):
+    """List all tasks, newest first."""
+    from app import database
+
+    tasks = database.list_tasks(limit=limit, offset=offset)
+    total = database.count_tasks()
+    return {"tasks": tasks, "total": total, "limit": limit, "offset": offset}
+
+
+@router.get("/history/{task_id}")
+async def get_history_task(task_id: str):
+    """Get full details of a single task."""
+    from app import database
+
+    task = database.get_task(task_id)
+    if task is None:
+        raise HTTPException(status_code=404, detail="Task not found")
+    return task
+
+
+# ── Subscriptions ────────────────────────────────────────────────────────
+
+@router.post("/subscriptions")
+async def create_subscription(
+    channel_url: str = Form(...),
+    platform: str = Form(...),
+    target_language: str = Form(default="zh"),
+):
+    """Add a new channel subscription."""
+    from app import database
+
+    channel_url = channel_url.strip()
+    if not channel_url:
+        raise HTTPException(status_code=400, detail="channel_url required")
+
+    sub = database.add_subscription(channel_url, platform, target_language)
+    return {"subscription": sub}
+
+
+@router.get("/subscriptions")
+async def list_subscriptions_endpoint():
+    """List all active subscriptions."""
+    from app import database
+
+    subs = database.list_subscriptions()
+    return {"subscriptions": subs}
+
+
+@router.delete("/subscriptions/{sub_id}")
+async def delete_subscription(sub_id: int):
+    """Delete a subscription."""
+    from app import database
+
+    ok = database.remove_subscription(sub_id)
+    if not ok:
+        raise HTTPException(status_code=404, detail="Subscription not found")
+    return {"deleted": sub_id}
+
+
+@router.post("/subscriptions/{sub_id}/check")
+async def trigger_subscription_check(sub_id: int):
+    """Manually trigger a check for new videos from a subscription."""
+    from app.services.subscription_checker import check_subscription
+
+    task_ids = check_subscription(sub_id)
+    return {"subscription_id": sub_id, "new_tasks": len(task_ids), "task_ids": task_ids}
 
 
 @router.get("/health")
