@@ -175,6 +175,9 @@ waiting → extracting_audio → transcribing → translating → burning_subtit
 - [x] 同语言跳过翻译
 - [x] 启动崩溃（`SUPPORTED_DOMAINS` 导入）→ 已移除导入
 - [x] `download_video` 改返回 list 后调用方解包崩溃 → 已适配
+- [x] `DUAL_SUBTITLES` / `split_long_segments` 只在 CLI 生效 → 已接入服务器 pipeline，两端行为一致
+- [x] 长中文字幕横向截断（右侧末尾）→ `_wrap_text` 字符级断行已修复（像素级验证 19–22px 余量）
+- [x] 超长字幕 PNG 高度 > 视频高度时 overlay 静默裁掉顶部 → 渲染前限制高度：先压缩字号，仍超则 crop 底部保顶部
 
 ### 待处理
 
@@ -183,7 +186,7 @@ waiting → extracting_audio → transcribing → translating → burning_subtit
 | 1 | 订阅检查用 Python `yt_dlp` 库（与 CLI 下载策略不一致），flat 模式下 `entry["url"]` 是裸视频 ID，直接交给 `download_video` 会失败 | 订阅下载大概率失败 | **高** |
 | 2 | `_translate_nllb` 过滤空文本后返回数量可能少于输入 → `zip` 静默丢段 | 翻译错位 | **高** |
 | 3 | `download_from_url` 落库的是占位路径，下载完成后未更新 DB | /history 显示假路径 | 中 |
-| 4 | `DUAL_SUBTITLES` / `split_long_segments` 只在 CLI 生效，服务器 pipeline 未接线 | 功能不一致 | 中 |
+| 4 | ~~`DUAL_SUBTITLES` / `split_long_segments` 只在 CLI 生效~~ → 已修复，两端一致 | — | — |
 | 5 | 双数据源（内存 + SQLite）靠散落的 update_task 手动同步，失败路径（routes.py 的下载/检查）只改内存不写库 | 状态漂移 | 中 |
 | 6 | 无并发限制，同时跑多个任务可能 OOM | 服务器崩溃 | 高 |
 | 7 | 进度长时间不动（Demucs/转录/翻译期间无更新） | 用户以为卡住 | 中 |

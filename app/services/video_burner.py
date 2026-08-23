@@ -52,7 +52,7 @@ def burn_subtitles(
     work_dir = Path(tempfile.mkdtemp(prefix="v2v_burn_"))
 
     # ── Get video dimensions for font scaling ──
-    vw, vh = _get_video_dimensions(video_path)
+    vw, vh = get_video_dimensions(video_path)
     ref = min(vw, vh)  # use smaller dimension for scaling (handles portrait/landscape)
 
     # ── Render each subtitle as a transparent PNG ──
@@ -60,7 +60,7 @@ def burn_subtitles(
     for i, (start, end, text) in enumerate(subtitles):
         png = work_dir / f"sub_{i:04d}.png"
         orig_text = orig_subtitles[i][2] if orig_subtitles and i < len(orig_subtitles) else None
-        _render_text_png(text, png, original_text=orig_text, video_ref=ref)
+        _render_text_png(text, png, original_text=orig_text, video_ref=ref, max_height=vh)
         png_paths.append(png)
 
     # ── Build ffmpeg command ──
@@ -106,7 +106,7 @@ def burn_subtitles(
     except subprocess.TimeoutExpired:
         raise BurnError("Timed out (2h)")
     except FileNotFoundError:
-        raise BurnError(f"ffmpeg not found")
+        raise BurnError("ffmpeg not found")
 
     if not output_path.exists() or output_path.stat().st_size == 0:
         raise BurnError("Output file empty")
@@ -116,7 +116,7 @@ def burn_subtitles(
 
 
 
-def _get_video_dimensions(video_path: Path) -> tuple[int, int]:
+def get_video_dimensions(video_path: Path) -> tuple[int, int]:
     """Get video width and height via ffprobe."""
     try:
         import json
@@ -138,15 +138,27 @@ def _get_video_dimensions(video_path: Path) -> tuple[int, int]:
     return (1920, 1080)
 
 
-def _render_text_png(text: str, output_path: Path, original_text: str | None = None, video_ref: int | None = None) -> None:
+def _render_text_png(
+    text: str,
+    output_path: Path,
+    original_text: str | None = None,
+    video_ref: int | None = None,
+    max_height: int | None = None,
+) -> None:
     """
     Render subtitle text to a transparent PNG.
-    
+
     Font size scales with video_ref (min of width/height) to handle
     both landscape (1920x1080) and portrait (1080x1920) videos uniformly.
+
+    max_height (video height in px) is a safety net: the overlay is
+    bottom-aligned (H-h-30), so an oversized PNG gets silently clipped from
+    the TOP and the first lines disappear. When the rendered subtitle would
+    be taller than the video, shrink the font first, then crop the bottom as
+    a last resort (keeps the top lines visible).
     """
     try:
-        from PIL import Image, ImageDraw, ImageFont
+        from PIL import Image
     except ImportError:
         raise BurnError("Pillow not installed: pip install Pillow")
 
@@ -158,9 +170,37 @@ def _render_text_png(text: str, output_path: Path, original_text: str | None = N
     else:
         size = base_size
     logger.debug(f"Font size: base={base_size}, scaled={size} (video_ref={video_ref})")
-    
+
     # Max PNG width: 85% of video ref, to prevent text going off-screen
     max_width = int(video_ref * 0.85) if video_ref else 1600
+
+    img = _render_layout(text, original_text, size, max_width)
+
+    # Height safety net (see docstring). Normal subtitles are far below this;
+    # only very long segments (e.g. 500+ chars) trigger the shrink loop.
+    if max_height and img.height > max_height:
+        for _ in range(8):
+            if size <= 8 or img.height <= max_height:
+                break
+            size = max(8, int(size * max_height / img.height))
+            img = _render_layout(text, original_text, size, max_width)
+        if img.height > max_height:
+            # Pathological case: keep the top lines, drop the overflow at the
+            # bottom (better than ffmpeg silently clipping the top).
+            img = img.crop((0, 0, img.width, max_height))
+            logger.warning(
+                f"Subtitle still taller than video ({max_height}px) at min font size; "
+                "cropped to fit"
+            )
+
+    img.save(output_path, "PNG")
+
+
+def _render_layout(
+    text: str, original_text: str | None, size: int, max_width: int
+):
+    """Render subtitle text to a transparent RGBA image at the given font size."""
+    from PIL import Image, ImageDraw
 
     font = _load_font(size)
 
@@ -244,12 +284,13 @@ def _render_text_png(text: str, output_path: Path, original_text: str | None = N
             draw.text((m, y_off), line, fill=settings.SUBTITLE_FONT_COLOR, font=font)
             y_off += lh
 
-    img.save(output_path, "PNG")
+    return img
+
 
 
 def _wrap_text(text: str, font, max_px: int) -> str:
     """Wrap text to fit within max_px pixels wide."""
-    from PIL import ImageDraw, Image
+    from PIL import Image, ImageDraw
     dummy = Image.new("RGBA", (1, 1), (0, 0, 0, 0))
     d = ImageDraw.Draw(dummy)
     words = text.split()

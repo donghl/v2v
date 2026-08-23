@@ -15,21 +15,21 @@ from datetime import datetime, timezone
 from enum import Enum
 from pathlib import Path
 
+from app import database
 from app.config.settings import settings
-from app.utils.logger import logger
-from app.services.audio_extractor import extract_audio, AudioExtractionError
-from app.services.vocal_separator import separate_vocals, VocalSeparationError
-from app.services.speech_to_text import transcribe, TranscriptionError
-from app.services.subtitle_generator import segments_to_srt
-from app.services.translator import translate_segments, TranslationError
-from app.services.video_burner import burn_subtitles, BurnError
+from app.services.audio_extractor import AudioExtractionError, extract_audio
 from app.services.cross_validation import (
-    transcribe_with_validation,
-    translate_with_validation,
     TranscriptionValidationError,
     TranslationValidationError,
+    transcribe_with_validation,
+    translate_with_validation,
 )
-from app import database
+from app.services.speech_to_text import TranscriptionError, transcribe
+from app.services.subtitle_generator import segments_to_srt, split_long_segments
+from app.services.translator import TranslationError, translate_segments
+from app.services.video_burner import BurnError, burn_subtitles, get_video_dimensions
+from app.services.vocal_separator import VocalSeparationError, separate_vocals
+from app.utils.logger import logger
 
 
 class PipelineStatus(str, Enum):
@@ -157,6 +157,18 @@ def run_pipeline(task_id: str) -> None:
         database.update_task(task_id, source_lang=detected_lang, progress=45)
         state.progress = 45
 
+        # Split long multi-sentence segments BEFORE translation so original
+        # and translated SRTs share the same boundaries. This also keeps each
+        # subtitle short enough that it never overflows the video height.
+        # Mirrors the behavior of the v2v CLI.
+        try:
+            vw, vh = get_video_dimensions(video_path)
+            video_ref = min(vw, vh)
+        except Exception:
+            video_ref = 1080
+        segments = split_long_segments(segments, video_ref=video_ref)
+        logger.info(f"[{task_id}] Split to {len(segments)} subtitle segments")
+
         # Save original SRT
         original_srt = work_dir / "original.srt"
         segments_to_srt(segments, original_srt)
@@ -205,7 +217,10 @@ def run_pipeline(task_id: str) -> None:
             output_filename = f"{video_path.stem}_subtitled_{target_lang}_{counter}.mp4"
             output_path = settings.OUTPUT_DIR / output_filename
             counter += 1
-        burn_subtitles(video_path, translated_srt, output_path)
+        if settings.DUAL_SUBTITLES and original_srt.exists() and detected_lang != target_lang:
+            burn_subtitles(video_path, translated_srt, output_path, original_srt_path=original_srt)
+        else:
+            burn_subtitles(video_path, translated_srt, output_path)
         state.progress = 98
 
         # ── Done ──
