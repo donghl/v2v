@@ -183,7 +183,10 @@ async def download_from_url(
     def download_then_run():
         try:
             logger.info(f"[{task.task_id}] Downloading from URL: {url}")
-            video_path, title = download_video(url, settings.INPUT_DIR)
+            results = download_video(url, settings.INPUT_DIR)
+            if not results:
+                raise DownloadError(f"No media downloaded from {url}")
+            video_path, title = results[0]
             # Update task with the real video path
             task.video_path = video_path
             logger.info(f"[{task.task_id}] Download complete: {title}")

@@ -7,7 +7,6 @@ from datetime import datetime, timezone
 from app.config.settings import settings
 from app.utils.logger import logger
 from app import database
-from app.services.video_downloader import SUPPORTED_DOMAINS
 
 
 class SubscriptionScheduler:
@@ -138,7 +137,11 @@ def _submit_video(url: str, target_lang: str, title: str, task_ids: list[str]) -
         return
 
     try:
-        video_path, _ = download_video(url, settings.INPUT_DIR)
+        results = download_video(url, settings.INPUT_DIR)
+        if not results:
+            logger.error(f"Download returned no files for {url}")
+            return
+        video_path, _ = results[0]
         task = submit_task(video_path, target_lang, source_url=url, source_title=title)
         task_ids.append(task.task_id)
         # Run in background thread
