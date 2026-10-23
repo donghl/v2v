@@ -111,19 +111,20 @@ curl -O http://localhost:8000/download/a1b2c3d4e5f6
 ### CLI
 
 ```bash
-# Translate and burn subtitles (CLI only)
+# Translate a local video to Chinese
 python -m v2v video.mp4 -t zh
 
-# Dual-subtitle mode (original + translation, bilingual)
-python -m v2v video.mp4 -t zh --dual-subtitles
+# Translate to English
+python -m v2v video.mp4 -t en
 
-# Long segments split into smaller chunks
-python -m v2v video.mp4 -t zh --split-long-segments
+# Translate a video from URL (YouTube, Bilibili, etc.)
+python -m v2v https://www.youtube.com/watch?v=xxxxx -t zh
+
+# Force reprocessing (ignore cache)
+python -m v2v video.mp4 -t zh --force
 ```
 
----
-
-## Subscribe & Watch
+### Subscribe & Watch
 
 Subscribe to YouTube channels and automatically process new videos:
 
@@ -145,7 +146,7 @@ curl -X POST http://localhost:8000/subscriptions/{id}/check
 
 ---
 
-## Supported Languages
+### Supported Languages
 
 | Code | Language |
 |------|----------|
@@ -163,7 +164,7 @@ curl -X POST http://localhost:8000/subscriptions/{id}/check
 
 ---
 
-## Translation Engines
+### Translation Engines
 
 | Engine | Quality | Setup | Offline | Notes |
 |---|---|---|---|---|
@@ -175,7 +176,7 @@ Set via `TRANSLATION_ENGINE` in `.env`.
 
 ---
 
-## Configuration
+### Configuration
 
 Key settings in `.env`:
 
@@ -194,7 +195,7 @@ Key settings in `.env`:
 
 ---
 
-## Model Download
+### Model Download
 
 - **Whisper models** download automatically to `./models/` on first run.
 - **MarianMT / NLLB models** download via HuggingFace transformers cache.
@@ -202,7 +203,7 @@ Key settings in `.env`:
 
 ---
 
-## Project Structure
+### Project Structure
 
 ```
 v2v/
@@ -240,7 +241,7 @@ v2v/
 
 ---
 
-## Docker
+### Docker
 
 ```bash
 # Start with GPU (default)
@@ -254,7 +255,7 @@ docker compose --config docker-compose.yml --config docker-compose.cpu.yml up -d
 
 ---
 
-## Next Steps (Production)
+### Next Steps (Production)
 
 - Replace in-memory task store with Redis + Celery
 - Add full Web UI (React/Vue)
