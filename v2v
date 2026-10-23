@@ -26,21 +26,38 @@ from app.services.translator import translate_segments
 from app.services.video_burner import burn_subtitles
 
 
-def process_video(video_path: Path, target_lang: str) -> Path:
-    """处理单个视频：提取音频 → 识别 → 翻译 → 烧录"""
+def process_video(video_path: Path, target_lang: str, force: bool = False) -> Path:
+    """处理单个视频：提取音频 → 识别 → 翻译 → 烧录（各阶段按文件时间缓存）"""
     work_dir = settings.TEMP_DIR / video_path.stem
     work_dir.mkdir(parents=True, exist_ok=True)
 
     print(f"\n🎬 处理: {video_path.name}")
 
-    # 1. 提取音频
-    print("🔊 提取音频...")
-    audio = extract_audio(video_path, work_dir)
+    # 1. 提取音频（缓存：wav 比视频新则跳过）
+    audio = work_dir / f"{video_path.stem}_audio.wav"
+    if not force and audio.exists() and audio.stat().st_mtime >= video_path.stat().st_mtime:
+        print("🔊 提取音频... (缓存命中，跳过)")
+    else:
+        print("🔊 提取音频...")
+        audio = extract_audio(video_path, work_dir)
 
-    # 2. 语音识别
-    print("🎤 语音识别...")
-    segments, detected_lang = transcribe(audio, work_dir)
+    # 2. 语音识别（缓存：segments.json + 语言文件比音频新则跳过）
+    seg_json = work_dir / f"{audio.stem}_segments.json"
+    lang_file = work_dir / "language.txt"
+    if (not force and seg_json.exists() and lang_file.exists()
+            and seg_json.stat().st_mtime >= audio.stat().st_mtime):
+        import json as _json
+        segments = _json.loads(seg_json.read_text(encoding="utf-8"))
+        detected_lang = lang_file.read_text(encoding="utf-8").strip()
+        print(f"🎤 语音识别... (缓存命中，{len(segments)} 条，lang={detected_lang})")
+    else:
+        print("🎤 语音识别...")
+        segments, detected_lang = transcribe(audio, work_dir)
+        lang_file.write_text(detected_lang, encoding="utf-8")
     print(f"   → 检测到语言: {detected_lang}, {len(segments)} 条字幕")
+
+    if not segments:
+        raise SystemExit("❌ 没有识别到任何语音段，跳过后续处理（检查音轨是否静音/损坏）")
 
     # 3. 切分长句（先切分再翻译，保证双语段数严格对齐）
     # 动态计算阈值：用视频宽高中的较小值做基准
@@ -64,21 +81,32 @@ def process_video(video_path: Path, target_lang: str) -> Path:
     # 4. 保存原文 SRT
     segments_to_srt(segments, work_dir / "original.srt")
 
-    # 5. 翻译
+    # 5. 翻译（缓存：translated.srt 与当前引擎、原文一致则跳过）
+    srt_path = work_dir / "translated.srt"
+    orig_srt = work_dir / "original.srt"
+    engine_marker = work_dir / "translated.engine.txt"
+    engine = settings.TRANSLATION_ENGINE
+
     if detected_lang == target_lang:
         print(f"✅ 源语言=目标语言 ({detected_lang})，跳过翻译")
-        translated = segments
+        segments_to_srt(segments, srt_path)
+    elif (not force and srt_path.exists() and engine_marker.exists()
+            and engine_marker.read_text(encoding="utf-8").strip() == engine
+            and srt_path.stat().st_mtime >= seg_json.stat().st_mtime):
+        print(f"🌐 翻译... (缓存命中，engine={engine}，换引擎或 --force 可重译)")
     else:
         print(f"🌐 翻译: {detected_lang} → {target_lang}...")
         translated = translate_segments(segments, detected_lang, target_lang, work_dir)
+        segments_to_srt(translated, srt_path)
+        engine_marker.write_text(engine, encoding="utf-8")
 
-    # 6. 生成翻译后 SRT（段数、时间戳与原文完全一致）
-    srt_path = work_dir / "translated.srt"
-    segments_to_srt(translated, srt_path)
-
-    # 6. 烧录字幕
+    # 6. 烧录字幕（缓存：成品比字幕新则跳过）
     output = settings.OUTPUT_DIR / f"{video_path.stem}_subtitled_{target_lang}.mp4"
-    orig_srt = work_dir / "original.srt"
+    if not force and output.exists() and output.stat().st_mtime >= srt_path.stat().st_mtime:
+        print(f"🔥 烧录... (缓存命中，跳过) → {output.name}")
+        print(f"✅ 完成 → {output}")
+        return output
+
     if settings.DUAL_SUBTITLES and orig_srt.exists() and detected_lang != target_lang:
         print(f"🔥 烧录双语字幕 → {output.name}")
         burn_subtitles(video_path, srt_path, output, original_srt_path=orig_srt)
@@ -94,6 +122,7 @@ def main():
     parser = argparse.ArgumentParser(description="V2V — 视频字幕翻译")
     parser.add_argument("input", nargs="+", help="视频文件路径或URL")
     parser.add_argument("--to", default="zh", help="目标语言 (默认: zh)")
+    parser.add_argument("--force", action="store_true", help="忽略缓存，全部阶段重跑")
     args = parser.parse_args()
 
     for item in args.input:
@@ -106,9 +135,9 @@ def main():
             videos = download_video(item, settings.INPUT_DIR)
             for video, title in videos:
                 print(f"   → {title}")
-                process_video(video, args.to)
+                process_video(video, args.to, force=args.force)
         elif p.exists():
-            process_video(p, args.to)
+            process_video(p, args.to, force=args.force)
         else:
             print(f"❌ 文件不存在: {item}")
 

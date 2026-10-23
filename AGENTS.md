@@ -68,6 +68,7 @@ Key settings in `.env`:
 - `USE_CROSS_VALIDATION` — dual-engine ASR/translation validation (default: false)
 - `USE_VOCAL_SEPARATION` — Demucs vocal removal (default: false; `.env.example` sets true)
 - `DUAL_SUBTITLES` — bilingual subtitles, original on top / translation below (default: false; **only honored by the `v2v` CLI, not the server pipeline**)
+- `SUBTITLE_FONT` — Font file path (.ttf/.ttc/.otf); empty = auto-detect (PingFang → STHeiti → Helvetica)
 - `SUBTITLE_FONT_SIZE` — Default: 24
 - `SUBTITLE_FONT_COLOR` — Default: white
 - `SUBTITLE_OUTLINE_COLOR` — Default: black

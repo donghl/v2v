@@ -331,8 +331,8 @@ def _wrap_text(text: str, font, max_px: int) -> str:
 def _load_font(size: int):
     """Load a font at the given size. Returns None on failure."""
     from PIL import ImageFont
-    # PingFang.ttc index 0 = PingFang SC Regular (supports CJK)
-    candidates = [
+    # SUBTITLE_FONT (.env) wins; PingFang.ttc index 0 = PingFang SC Regular (supports CJK)
+    candidates = [p for p in (settings.SUBTITLE_FONT,) if p] + [
         "/System/Library/Fonts/PingFang.ttc",
         "/System/Library/Fonts/STHeiti Light.ttc",
         "/System/Library/Fonts/Helvetica.ttc",

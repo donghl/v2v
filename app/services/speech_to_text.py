@@ -120,12 +120,19 @@ def transcribe(audio_path: Path, temp_dir: Path) -> tuple[list[Segment], str]:
     )
 
     segments: list[Segment] = []
+    duration = float(getattr(info, "duration", 0) or 0)
     for seg in segments_raw:
         segments.append(Segment(
             start=round(seg.start, 3),
             end=round(seg.end, 3),
             text=seg.text.strip(),
         ))
+        if duration > 0:
+            logger.info(
+                f"  ASR {min(seg.start / duration, 1.0) * 100:5.1f}% "
+                f"[{_format_time(seg.start)}/{_format_time(duration)}] "
+                f"{seg.text.strip()[:60]}"
+            )
 
     # Persist for caching / debugging
     json_path = temp_dir / f"{audio_path.stem}_segments.json"
@@ -140,6 +147,12 @@ def transcribe(audio_path: Path, temp_dir: Path) -> tuple[list[Segment], str]:
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
+def _format_time(seconds: float) -> str:
+    """Format seconds as m:ss (e.g. 125.3 → '2:05')."""
+    total = int(seconds)
+    return f"{total // 60}:{total % 60:02d}"
+
 
 def _resolve_device() -> str:
     """Auto-detect best available device or honour WHISPER_DEVICE setting."""

@@ -98,6 +98,7 @@ class Settings:
     FFPROBE_PATH: str = os.getenv("FFPROBE_PATH", "ffprobe")
 
     # --- Subtitle style ---
+    SUBTITLE_FONT: str = os.getenv("SUBTITLE_FONT", "")  # font file path (.ttf/.ttc/.otf); empty = auto-detect
     SUBTITLE_FONT_SIZE: int = int(os.getenv("SUBTITLE_FONT_SIZE", "24"))
     SUBTITLE_FONT_COLOR: str = os.getenv("SUBTITLE_FONT_COLOR", "white")
     SUBTITLE_OUTLINE_COLOR: str = os.getenv("SUBTITLE_OUTLINE_COLOR", "black")

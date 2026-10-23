@@ -74,14 +74,38 @@ def translate_segments(
     engine = settings.TRANSLATION_ENGINE
     logger.info(f"Translating {len(segments)} segments: {source_lang} → {target_lang} (engine={engine})")
 
-    if engine == "marian":
-        texts = _translate_marian([s["text"] for s in segments], source_lang, target_lang)
-    elif engine == "nllb":
-        texts = _translate_nllb([s["text"] for s in segments], source_lang, target_lang)
-    elif engine == "google":
-        texts = _translate_google([s["text"] for s in segments], source_lang, target_lang)
-    else:
-        raise TranslationError(f"Unknown translation engine: {engine}")
+    # Try the configured engine first, then fall back to engines that need no
+    # network (marian) before Google — a blocked/unreachable engine should not
+    # silently produce untranslated output.
+    chain = [engine] + [e for e in ("marian", "google") if e != engine]
+    errors: list[str] = []
+    texts: list[str] | None = None
+    for eng in chain:
+        try:
+            if eng == "marian":
+                texts = _translate_marian([s["text"] for s in segments], source_lang, target_lang)
+            elif eng == "nllb":
+                texts = _translate_nllb([s["text"] for s in segments], source_lang, target_lang)
+            elif eng == "google":
+                texts = _translate_google([s["text"] for s in segments], source_lang, target_lang)
+            else:
+                raise TranslationError(f"Unknown translation engine: {eng}")
+            if len(texts) != len(segments):
+                raise TranslationError(
+                    f"{eng} returned {len(texts)} texts for {len(segments)} segments"
+                )
+            if eng != engine:
+                logger.warning(
+                    f"Engine '{engine}' failed ({'; '.join(errors)}) — fell back to '{eng}'"
+                )
+            break
+        except Exception as e:
+            errors.append(f"{eng}: {e}")
+            logger.warning(f"Engine '{eng}' failed: {e}")
+            texts = None
+
+    if texts is None:
+        raise TranslationError("All translation engines failed: " + " | ".join(errors))
 
     translated: list[Segment] = []
     for seg, txt in zip(segments, texts):
@@ -277,15 +301,28 @@ def _translate_google(texts: list[str], source_lang: str, target_lang: str) -> l
     except Exception as e:
         raise TranslationError(f"Failed to initialise GoogleTranslator: {e}")
 
+    consecutive_failures = 0
+
     def _translate_one(text: str, max_retries: int = 3) -> str:
+        nonlocal consecutive_failures
         for attempt in range(max_retries):
             try:
-                return translator.translate(text)
+                result = translator.translate(text)
+                consecutive_failures = 0
+                return result
             except Exception:
                 if attempt < max_retries - 1:
                     time.sleep(1.5 ** attempt)  # exponential backoff
+        consecutive_failures += 1
+        if consecutive_failures >= 3:
+            # Circuit breaker: Google is unreachable, stop burning retries on
+            # every segment and let translate_segments fall back to an
+            # offline engine instead.
+            raise TranslationError(
+                f"Google Translate unreachable ({consecutive_failures} consecutive failures)"
+            )
         logger.warning(f"Google translate failed after {max_retries} retries: '{text[:50]}...'")
-        return text  # keep original on total failure
+        return text  # keep original on isolated failure
 
     results: list[str] = []
     for text in texts:
