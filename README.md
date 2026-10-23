@@ -2,20 +2,21 @@
 
 Automatically transcribe, translate, and burn subtitles into videos.
 
-**Input:** A video file + target language → **Output:** Subtitled video.
+**Input:** A video file (upload or URL) + target language → **Output:** Subtitled video.
 
 ---
 
 ## How It Works
 
 ```
-Video → Extract Audio → Whisper ASR → SRT → Translate → Burn Subtitles → Output
+Video → Extract Audio → (optional: Vocal Separation) → Whisper ASR → SRT → Translate → Burn Subtitles → Output
 ```
 
 1. **Extract audio** — ffmpeg extracts mono 16kHz WAV
-2. **Transcribe** — faster-whisper detects language + generates timed segments
-3. **Translate** — segments translated via MarianMT, NLLB-200, or Google Translate
-4. **Burn** — ffmpeg burns translated SRT into the video
+2. **Vocal separation** (optional) — Demucs isolates vocals from background music
+3. **Transcribe** — faster-whisper detects language + generates timed SRT segments
+4. **Translate** — segments translated via MarianMT, NLLB-200, or Google Translate
+5. **Burn** — ffmpeg burns translated SRT into the video
 
 ---
 
@@ -50,10 +51,10 @@ pip install -r requirements.txt
 
 ```bash
 cp .env.example .env
-# Edit .env to change model size, device, etc.
+# Edit .env to change model size, device, translation engine, etc.
 ```
 
-Recommended for first run (no model download needed):
+**Recommended for first run (no model download needed):**
 
 ```env
 TRANSLATION_ENGINE=google
@@ -65,74 +66,81 @@ TRANSLATION_ENGINE=google
 uvicorn app.main:app --reload
 ```
 
-Server starts at http://localhost:8000
+Server starts at http://localhost:8000 (Docker: port **8010**).
 
 ---
 
-## API
+## Usage
 
-### Upload a video
+### Web API
+
+Upload a video (file or URL), track progress, and download the result:
+
+| Endpoint | Method | Description |
+|---|---|---|
+| `/upload` | POST | Upload video file + `target_language` |
+| `/download-url` | POST | Download from YouTube, Bilibili, etc. |
+| `/process` | POST | Process a file already in `input/` |
+| `/process-all` | POST | Sequentially process all pending files |
+| `/status/{task_id}` | GET | Live task state |
+| `/download/{task_id}` | GET | Download result video |
+| `/health` | GET | Health check |
+
+#### Examples
 
 ```bash
+# Upload a video
 curl -X POST http://localhost:8000/upload \
   -F "video=@test.mp4" \
   -F "target_language=zh"
-```
 
-Response:
-
-```json
-{"task_id": "a1b2c3d4e5f6"}
-```
-
-### Download from URL
-
-```bash
+# Download from a URL (YouTube, Bilibili, etc.)
 curl -X POST http://localhost:8000/download-url \
   -F "url=https://www.youtube.com/watch?v=xxxxx" \
   -F "target_language=zh"
-```
 
-Response:
-
-```json
-{"task_id": "a1b2c3d4e5f6"}
-```
-
-Supported platforms: YouTube, Facebook, TikTok, X (Twitter), Instagram, Vimeo, Bilibili, and more. Then track progress and download results the same way as upload.
-
-### Check status
-
-```bash
+# Check status
 curl http://localhost:8000/status/a1b2c3d4e5f6
-```
 
-Response:
-
-```json
-{"task_id": "a1b2c3d4e5f6", "status": "translating", "progress": 65.0}
-```
-
-Status values: `waiting` → `extracting_audio` → `transcribing` → `translating` → `burning_subtitles` → `completed` / `failed`
-
-### Download result
-
-```bash
+# Download result
 curl -O http://localhost:8000/download/a1b2c3d4e5f6
 ```
 
-### Health check
+**Status values:** `waiting` → `extracting_audio` → `transcribing` → `translating` → `burning_subtitles` → `completed` / `failed`
+
+### CLI
 
 ```bash
-curl http://localhost:8000/health
+# Translate and burn subtitles (CLI only)
+python -m v2v video.mp4 -t zh
+
+# Dual-subtitle mode (original + translation, bilingual)
+python -m v2v video.mp4 -t zh --dual-subtitles
+
+# Long segments split into smaller chunks
+python -m v2v video.mp4 -t zh --split-long-segments
 ```
 
 ---
 
-## Docker
+## Subscribe & Watch
+
+Subscribe to YouTube channels and automatically process new videos:
 
 ```bash
-docker compose up
+# Add a channel subscription
+curl -X POST http://localhost:8000/subscriptions \
+  -H "Content-Type: application/json" \
+  -d '{"channel": "https://www.youtube.com/c/ChannelName", "target_language": "zh"}'
+
+# List subscriptions
+curl http://localhost:8000/subscriptions
+
+# Remove a subscription
+curl -X DELETE http://localhost:8000/subscriptions/{id}
+
+# Manually trigger a channel check
+curl -X POST http://localhost:8000/subscriptions/{id}/check
 ```
 
 ---
@@ -151,27 +159,46 @@ docker compose up
 | de | German |
 | ru | Russian |
 | pt | Portuguese |
-| + more | |
+| + more | + more via engine-specific language maps |
 
 ---
 
 ## Translation Engines
 
-| Engine | Quality | Setup | Offline |
-|--------|---------|-------|---------|
-| `google` | Good | Zero setup (pip install deep-translator) | No |
-| `marian` | Decent | Downloads models automatically (~300MB/pair) | Yes |
-| `nllb` | Best | Downloads 2.4GB model | Yes |
+| Engine | Quality | Setup | Offline | Notes |
+|---|---|---|---|---|
+| `google` | Good | Zero setup (`pip install deep-translator`) | No | Recommended for first run |
+| `marian` | Decent | Downloads models (~300MB/pair) | Yes | Use code `zh` for Chinese |
+| `nllb` | Best | Downloads 1.3GB model | Yes | Use code `zho_Hans` for Chinese |
 
 Set via `TRANSLATION_ENGINE` in `.env`.
 
 ---
 
+## Configuration
+
+Key settings in `.env`:
+
+| Variable | Default | Description |
+|---|---|---|
+| `WHISPER_MODEL` | `medium` | `tiny` / `base` / `small` / `medium` / `large-v3` |
+| `WHISPER_DEVICE` | `auto` | `cpu` / `cuda` / `auto` |
+| `TRANSLATION_ENGINE` | `marian` | `google` / `marian` / `nllb` |
+| `USE_CROSS_VALIDATION` | `false` | Dual-engine ASR + translation validation |
+| `USE_VOCAL_SEPARATION` | `false` | Enable Demucs vocal/instrumental separation |
+| `DUAL_SUBTITLES` | `false` | Bilingual subtitles (CLI only) |
+| `SUBTITLE_FONT` | *(auto-detect)* | Font file path (.ttf/.ttc/.otf) |
+| `SUBTITLE_FONT_SIZE` | `24` | Font size |
+| `DATABASE_PATH` | `./v2v.db` | SQLite path |
+| `SUBSCRIPTION_CHECK_INTERVAL` | `3600` | Seconds between channel polls |
+
+---
+
 ## Model Download
 
-Whisper models download automatically to `./models/` on first run.
-
-MarianMT / NLLB models download via HuggingFace transformers cache.
+- **Whisper models** download automatically to `./models/` on first run.
+- **MarianMT / NLLB models** download via HuggingFace transformers cache.
+- **Demucs** models auto-download when `USE_VOCAL_SEPARATION=true`.
 
 ---
 
@@ -190,15 +217,21 @@ v2v/
 │   │   ├── translator.py
 │   │   ├── subtitle_generator.py
 │   │   ├── video_burner.py
-│   │   └── video_downloader.py  # yt-dlp URL downloads
+│   │   ├── video_downloader.py  # yt-dlp URL downloads
+│   │   ├── vocal_separator.py   # Demucs separation
+│   │   ├── subscription_checker.py
+│   │   └── cross_validation.py
 │   ├── config/
 │   │   └── settings.py      # Configuration
+│   ├── templates/
+│   │   └── index.html       # Web UI
 │   └── utils/
 │       └── logger.py
-├── input/                   # Uploaded videos
-├── output/                  # Processed videos
-├── temp/                    # Temporary files per task
+├── input/                   # Uploaded/downloaded videos
+├── output/                  # Processed videos (<stem>_subtitled_<lang>.mp4)
+├── temp/                    # Per-task working dirs (auto-cleaned)
 ├── models/                  # Whisper model storage
+├── docs/                    # Engineering logs
 ├── requirements.txt
 ├── Dockerfile
 ├── docker-compose.yml
@@ -207,10 +240,25 @@ v2v/
 
 ---
 
+## Docker
+
+```bash
+# Start with GPU (default)
+docker compose up -d
+
+# Start without GPU
+docker compose --config docker-compose.yml --config docker-compose.cpu.yml up -d
+
+# Run on port 8010 (default)
+```
+
+---
+
 ## Next Steps (Production)
 
 - Replace in-memory task store with Redis + Celery
-- Add Web UI (React/Vue)
+- Add full Web UI (React/Vue)
 - Add batch processing endpoint
-- Add bilingual subtitle support
-- Add GPU Docker support (nvidia-docker)
+- Wire `DUAL_SUBTITLES` and `split_long_segments` into the server pipeline
+- Add GPU Docker support (`nvidia` driver)
+- Add webhook notifications on task completion
